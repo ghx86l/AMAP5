@@ -1,0 +1,8 @@
+{
+	"BuildId": "43139311",
+	"Modules": 
+	{
+		"Graph": "UnrealEditor-Graph-Win64-DebugGame.dll",
+		"IK_Loader": "UnrealEditor-IK_Loader-Win64-DebugGame.dll"
+	}
+}

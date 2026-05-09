@@ -1,0 +1,10 @@
+{
+	"BuildId": "43139311",
+	"Modules": 
+	{
+		"AMAP5_Editor": "UnrealEditor-AMAP5_Editor.dll",
+		"AMAP5_Runtime": "UnrealEditor-AMAP5_Runtime.dll",
+		"LimAnimEditor": "UnrealEditor-LimAnimEditor.dll",
+		"LimAnimRuntime": "UnrealEditor-LimAnimRuntime.dll"
+	}
+}
