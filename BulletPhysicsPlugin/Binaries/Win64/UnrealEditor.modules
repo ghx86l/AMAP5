@@ -1,0 +1,9 @@
+{
+	"BuildId": "43139311",
+	"Modules": 
+	{
+		"BulletPhysicsEngine": "UnrealEditor-BulletPhysicsEngine.dll",
+		"PmxPhysics_Editor": "UnrealEditor-PmxPhysics_Editor.dll",
+		"PmxPhysics_Runtime": "UnrealEditor-PmxPhysics_Runtime.dll"
+	}
+}
