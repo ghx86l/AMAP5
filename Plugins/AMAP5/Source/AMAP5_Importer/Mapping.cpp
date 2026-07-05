@@ -1,0 +1,198 @@
+﻿// Copyright (c) 2025 Jeonghyeon Ha. All Rights Reserved. 
+
+#include "Mapping.h"
+
+#include "InterchangeMaterialInstanceNode.h"
+#include "Log.h"
+#include "HAL/IConsoleManager.h"
+#include "Utils.h"
+
+// Console variables needed for material mapping
+// Parent material for Material Instances. Users can override via console: PMXImporter.ParentMaterial
+static TAutoConsoleVariable<FString> CVarPMXImporterParentMaterial(
+	TEXT("PMXImporter.ParentMaterial"),
+	TEXT(""),
+	TEXT("Parent material path for PMX Material Instances. Default = /PMXImporter/M_PMX_Base.M_PMX_Base"),
+	ECVF_Default);
+
+void FPmxMaterialMapping::CreateMaterials(const FPmxModel& PmxModel, const TMap<int32, FString>& TextureUidMap,
+	UInterchangeBaseNodeContainer& BaseNodeContainer, TArray<FString>& OutMaterialUids, TArray<FString>& OutSlotNames,
+	const FString& InParentMaterialPath)
+{
+	OutMaterialUids.Reserve(PmxModel.Materials.Num());
+	OutSlotNames.Reserve(PmxModel.Materials.Num());
+
+	// Determine parent material path: Pipeline setting takes priority, CVar as fallback
+	FString ParentMaterialPath = InParentMaterialPath;
+	ParentMaterialPath.TrimStartAndEndInline();
+	UE_LOG(LogPMXImporter, Display, TEXT("PMX MaterialMapping: InParentMaterialPath='%s'"), *InParentMaterialPath);
+	if (ParentMaterialPath.IsEmpty())
+	{
+		// Fallback to CVar default
+		ParentMaterialPath = CVarPMXImporterParentMaterial.GetValueOnAnyThread();
+		ParentMaterialPath.TrimStartAndEndInline();
+		UE_LOG(LogPMXImporter, Display, TEXT("PMX MaterialMapping: Using CVar fallback='%s'"), *ParentMaterialPath);
+	}
+	UE_LOG(LogPMXImporter, Display, TEXT("PMX MaterialMapping: Final ParentMaterialPath='%s'"), *ParentMaterialPath);
+
+	// Track used labels to ensure uniqueness
+	TMap<FString, int32> UsedLabels;
+
+	// Counters for summary
+	int32 CountTwoSided = 0;
+	int32 CountTranslucent = 0;
+	int32 CountMasked = 0;
+
+	for (int32 MatIdx = 0; MatIdx < PmxModel.Materials.Num(); ++MatIdx)
+	{
+		const FPmxMaterial& PmxMat = PmxModel.Materials[MatIdx];
+		// Prefer original PMX material name (can be CJK), fallback to English, then index
+		FString SlotLabel = PmxMat.Name;
+		SlotLabel.TrimStartAndEndInline();
+		if (SlotLabel.IsEmpty())
+		{
+			SlotLabel = PmxMat.NameEng;
+			SlotLabel.TrimStartAndEndInline();
+		}
+		if (SlotLabel.IsEmpty())
+		{
+			SlotLabel = FString::Printf(TEXT("Mat_%d"), MatIdx);
+		}
+		// Unique-ify the label if needed
+		int32& Count = UsedLabels.FindOrAdd(SlotLabel);
+		FString UniqueLabel = SlotLabel;
+		if (Count > 0)
+		{
+			UniqueLabel = FString::Printf(TEXT("%s_%d"), *SlotLabel, Count);
+		}
+		++Count;
+
+		// Sanitize for display (removes special chars, preserves Unicode)
+		FString SanitizedLabel = FPmxUtils::SanitizePackagePath(UniqueLabel);
+
+		// All material instances must have MI_ prefix
+		const FString DisplayLabel = FString::Printf(TEXT("MI_%s"), *SanitizedLabel);
+
+		// Create a Material Instance node only; parent will be set by Import UI pipeline.
+		// For NodeUid, use index-based naming to ensure uniqueness even with Unicode names
+		const FString MiNodeUid = FString::Printf(TEXT("/PMX/Materials/%d_%s"), MatIdx, *SanitizedLabel);
+		UInterchangeMaterialInstanceNode* MiNode = UInterchangeMaterialInstanceNode::Create(&BaseNodeContainer, *DisplayLabel, *MiNodeUid);
+		UE_LOG(LogPMXImporter, Verbose, TEXT("PMX Translator: Create MI Node Display='%s' SlotLabel='%s' NodeUid='%s'"), *DisplayLabel, *UniqueLabel, *MiNodeUid);
+		if (ensure(MiNode))
+		{
+			if (!ParentMaterialPath.IsEmpty())
+			{
+				MiNode->SetCustomParent(ParentMaterialPath);
+				UE_LOG(LogPMXImporter, Display, TEXT("PMX Translator: Set parent material to '%s' for MI '%s'"), *ParentMaterialPath, *DisplayLabel);
+			}
+			else
+			{
+				UE_LOG(LogPMXImporter, Warning, TEXT("PMX Translator: No parent material path specified for MI '%s'"), *DisplayLabel);
+			}
+
+			// ---- IM4U-inspired mappings ----
+			// BaseColor via texture index if available, else fallback to diffuse color.
+			FString BaseColorTexUid;
+			if (PmxMat.TextureIndex >= 0)
+			{
+				if (const FString* FoundTexUid = TextureUidMap.Find(PmxMat.TextureIndex))
+				{
+					BaseColorTexUid = *FoundTexUid;
+				}
+			}
+			FString SphereTexUid;
+			if (PmxMat.SphereMode != 0 && PmxMat.SphereTextureIndex >= 0)
+			{
+				if (const FString* FoundTexUid = TextureUidMap.Find(PmxMat.SphereTextureIndex))
+				{
+					SphereTexUid = *FoundTexUid;
+				}
+			}
+			// VRM4U-style materials consume mtoon_* names, while the local base material
+			// consumes BaseColor*. Write both so the same import works with either parent.
+            MiNode->AddVectorParameterValue(TEXT("BaseColor"), PmxMat.Diffuse);
+            MiNode->AddVectorParameterValue(TEXT("DiffuseColor"), PmxMat.Diffuse);
+            MiNode->AddVectorParameterValue(TEXT("Color"), PmxMat.Diffuse);
+			MiNode->AddVectorParameterValue(TEXT("BaseColorTint"), PmxMat.Diffuse);
+			MiNode->AddVectorParameterValue(TEXT("mtoon_Color"), PmxMat.Diffuse);
+
+			const FLinearColor ShadeColor(
+				FMath::Clamp(PmxMat.Ambient.X, 0.0f, 1.0f),
+				FMath::Clamp(PmxMat.Ambient.Y, 0.0f, 1.0f),
+				FMath::Clamp(PmxMat.Ambient.Z, 0.0f, 1.0f),
+				1.0f);
+			MiNode->AddVectorParameterValue(TEXT("mtoon_ShadeColor"), ShadeColor);
+			MiNode->AddVectorParameterValue(TEXT("mtoon_OutlineColor"), PmxMat.EdgeColor);
+
+			if (!BaseColorTexUid.IsEmpty())
+			{
+				MiNode->AddTextureParameterValue(TEXT("BaseColorTexture"), BaseColorTexUid);
+                MiNode->AddTextureParameterValue(TEXT("MainTexture"), BaseColorTexUid);
+                MiNode->AddTextureParameterValue(TEXT("DiffuseTexture"), BaseColorTexUid);
+				MiNode->AddTextureParameterValue(TEXT("mtoon_tex_MainTex"), BaseColorTexUid);
+				MiNode->AddTextureParameterValue(TEXT("gltf_tex_diffuse"), BaseColorTexUid);
+			}
+			if (!SphereTexUid.IsEmpty())
+			{
+				MiNode->AddTextureParameterValue(TEXT("mtoon_tex_SphereAdd"), SphereTexUid);
+				MiNode->AddTextureParameterValue(TEXT("mtoon_tex_MatCap"), SphereTexUid);
+			}
+
+			// TwoSided from PMX drawing flags (bit 0 = culling off/double-sided)
+			const bool bTwoSided = ((PmxMat.DrawingFlags & 0x01) != 0);
+			if (bTwoSided)
+			{
+				MiNode->AddStaticSwitchParameterValue(TEXT("bTwoSided"), true);
+				++CountTwoSided;
+			}
+
+			// Opacity from PMX diffuse alpha (conservative)
+			const float Opacity = FMath::Clamp(PmxMat.Diffuse.A, 0.0f, 1.0f);
+			MiNode->AddScalarParameterValue(TEXT("Opacity"), Opacity);
+			MiNode->AddScalarParameterValue(TEXT("mtoon_Cutoff"), 0.0f);
+			MiNode->AddScalarParameterValue(TEXT("mtoon_BlendMode"), Opacity < 0.999f ? 2.0f : 0.0f);
+			MiNode->AddScalarParameterValue(TEXT("mtoon_CullMode"), bTwoSided ? 0.0f : 2.0f);
+			MiNode->AddScalarParameterValue(TEXT("mtoon_OutlineWidth"), PmxMat.EdgeSize);
+
+			// Conservative blend inference: treat alpha < 1 as Translucent hint (Masked requires explicit support later)
+			if (Opacity < 0.999f)
+			{
+				MiNode->AddStaticSwitchParameterValue(TEXT("bTranslucentHint"), true);
+				++CountTranslucent;
+			}
+
+			// Metadata preservation as numeric parameters so they survive through pipelines
+			MiNode->AddScalarParameterValue(TEXT("pmx.mat.index"), static_cast<float>(MatIdx));
+			// Sphere/Toon metadata (numeric only here)
+			MiNode->AddScalarParameterValue(TEXT("pmx.sphere.mode"), static_cast<float>(PmxMat.SphereMode));
+			MiNode->AddStaticSwitchParameterValue(TEXT("pmx.toon.mode"), static_cast<bool>(PmxMat.SharedToonFlag));
+
+			// Edge, Specular, Ambient (store common fields if available)
+			MiNode->AddStaticSwitchParameterValue(TEXT("pmx.edge.draw"), PmxMat.EdgeSize > 0.0f);
+			MiNode->AddVectorParameterValue(TEXT("pmx.edge.color"), PmxMat.EdgeColor);
+			MiNode->AddScalarParameterValue(TEXT("pmx.edge.size"), PmxMat.EdgeSize);
+			MiNode->AddVectorParameterValue(TEXT("pmx.specular.rgb"), FLinearColor(PmxMat.Specular.X, PmxMat.Specular.Y, PmxMat.Specular.Z, 1.0f));
+			MiNode->AddScalarParameterValue(TEXT("pmx.specular.power"), PmxMat.SpecularStrength);
+			MiNode->AddVectorParameterValue(TEXT("pmx.ambient.rgb"), FLinearColor(PmxMat.Ambient.X, PmxMat.Ambient.Y, PmxMat.Ambient.Z, 1.0f));
+
+			UE_LOG(LogPMXImporter, Log, TEXT("[Mapping.Material %d] Name='%s' Parent='%s' BaseTexUid='%s' SphereTexUid='%s' ToonTextureImport=Disabled TwoSided=%d Opacity=%.3f"),
+				MatIdx, *PmxMat.Name, *ParentMaterialPath, *BaseColorTexUid, *SphereTexUid, (bTwoSided ? 1 : 0), Opacity);
+
+			// Store slot mapping with MI node UID
+			OutSlotNames.Add(UniqueLabel);
+			OutMaterialUids.Add(MiNode->GetUniqueID());
+		}
+		else
+		{
+			// Fallback: keep slot index with empty material to avoid misalignment
+			OutSlotNames.Add(UniqueLabel);
+			OutMaterialUids.Add(TEXT(""));
+		}
+	}
+
+	UE_LOG(LogPMXImporter, Display, TEXT("PMX Translator: Materials=%d, TwoSided=%d, Masked=%d, Translucent=%d"),
+		PmxModel.Materials.Num(), CountTwoSided, CountMasked, CountTranslucent);
+}
+
+// SanitizeAsciiToken function moved to FPmxUtils class
+
