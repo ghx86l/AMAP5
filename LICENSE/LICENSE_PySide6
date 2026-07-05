@@ -1,17 +1,10 @@
-THIRD-PARTY LICENSE NOTICE
+PySide6 License Notice
+======================
 
-PySide6 / Qt for Python
+This repository uses or may use PySide6 / Qt for Python.
 
-This project uses PySide6, also known as Qt for Python.
-PySide6 and Qt are copyright (C) The Qt Company Ltd. and contributors.
+PySide6 is provided by The Qt Company / Qt Project and is not owned by this repository.
+This repository elects to use PySide6 under the GNU Lesser General Public License version 3.0 (LGPLv3).
 
-PySide6 / Qt for Python and related Qt components are available under Qt commercial licenses and open-source licenses, including LGPL v3 and GPL v3, depending on the component used.
-Some code included with Qt for Python may be covered by additional third-party license terms.
-
-Official license information:
-https://doc.qt.io/qtforpython-6/licenses.html
-https://www.qt.io/development/download-open-source
-
-If this project distributes binaries that include PySide6 or Qt libraries, the distributor must comply with the applicable license terms, including preserving copyright notices, including relevant license texts, and providing any required source-code or relinking rights.
-
-No endorsement by The Qt Company is implied.
+SPDX reference for PySide6 usage in this repository:
+SPDX-License-Identifier: LGPL-3.0-only
