@@ -1,0 +1,10 @@
+PySide6 License Notice
+======================
+
+This repository uses or may use PySide6 / Qt for Python.
+
+PySide6 is provided by The Qt Company / Qt Project and is not owned by this repository.
+This repository elects to use PySide6 under the GNU Lesser General Public License version 3.0 (LGPLv3).
+
+SPDX reference for PySide6 usage in this repository:
+SPDX-License-Identifier: LGPL-3.0-only
